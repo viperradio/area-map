@@ -51,6 +51,19 @@
   #toggleSide { display:none; }
   #main:has(#side.open) .leaflet-control-scale { display:none; }
   #fileIn { display:none; }
+  #syncBtn .st { font-size:12px; color:var(--muted); margin-left:4px; }
+  #syncBtn.ok .st { color:#15803d; } #syncBtn.warn .st { color:#b45309; } #syncBtn.err .st { color:#b91c1c; }
+  #syncPanel { position:fixed; inset:0; background:rgba(17,24,39,.45); z-index:2000; display:none; align-items:flex-start; justify-content:center; padding:max(24px, env(safe-area-inset-top)) 12px 12px; overflow:auto; }
+  #syncPanel.open { display:flex; }
+  .sp-box { background:#fff; border-radius:12px; width:100%; max-width:460px; padding:16px; box-shadow:0 10px 30px rgba(0,0,0,.25); font-size:14px; line-height:1.45; }
+  .sp-box h2 { font-size:16px; margin:0 0 8px; }
+  .sp-box label { display:block; font-size:12px; color:var(--muted); margin:10px 0 3px; }
+  .sp-box input, .sp-box textarea { width:100%; font:inherit; font-size:16px; padding:7px 9px; border:1px solid var(--line); border-radius:8px; }
+  .sp-box textarea { font-size:12px; min-height:64px; }
+  .sp-box ol { padding-left:20px; margin:6px 0; }
+  .sp-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+  .sp-status { margin-top:10px; font-size:13px; color:var(--muted); }
+  .sp-warn { font-size:12px; color:#92400e; background:#fef3c7; border-radius:8px; padding:6px 8px; margin-top:8px; }
   .hint { font-size:12px; color:var(--muted); padding:8px 12px; border-top:1px solid var(--line); }
   @media (max-width: 760px) {
     #toggleSide { display:inline-block; }
@@ -68,6 +81,7 @@
   <header>
     <h1>Areas of Interest · Grass Valley / Nevada City</h1>
     <button id="toggleSide" title="Show areas">☰ <span id="cntBtn">0</span></button>
+    <button id="syncBtn" title="Cloud sync settings">☁<span class="lbl"> Sync</span><span class="st" id="syncSt"></span></button>
     <button id="exportBtn" title="Download GeoJSON backup">⬇<span class="lbl"> Export</span></button>
     <button id="importBtn" title="Load a GeoJSON file">⬆<span class="lbl"> Import</span></button>
     <input type="file" id="fileIn" accept=".geojson,.json,application/geo+json,application/json">
@@ -93,9 +107,38 @@
           <button id="edDelete" class="danger">Delete</button>
         </div>
       </div>
-      <div class="hint">Draw with the tools on the map (polygon, rectangle, circle). Click an area to edit it. Saved automatically in this browser — use Export to back up or move to another device.</div>
+      <div class="hint">Draw with the tools on the map (polygon, rectangle, circle). Click an area to edit it. Saved automatically in this browser — turn on ☁ Sync to share areas across devices, or use Export to back up.</div>
     </aside>
     <div id="map"></div>
+  </div>
+</div>
+
+<div id="syncPanel" role="dialog" aria-modal="true" aria-labelledby="spTitle">
+  <div class="sp-box">
+    <div class="row" style="justify-content:space-between"><h2 id="spTitle">Sync between devices</h2><button id="spClose" title="Close">✕</button></div>
+    <div>Areas sync through a private (secret) GitHub gist. Set this up once on each device:</div>
+    <ol>
+      <li><a href="https://github.com/settings/tokens/new?scopes=gist&amp;description=Area%20map%20sync" target="_blank" rel="noopener">Create a GitHub token</a> with only the <b>gist</b> box checked (pick an expiration, then Generate token and copy it).</li>
+      <li>Paste the token and your sync gist id below, then tap <b>Save &amp; sync</b>.</li>
+      <li>On your other devices, use <b>Copy setup link</b> here and open that link there instead.</li>
+    </ol>
+    <label for="spToken">GitHub token (gist scope only)</label>
+    <input type="password" id="spToken" autocomplete="off" spellcheck="false" placeholder="Paste your token">
+    <label for="spGist">Gist id</label>
+    <input type="text" id="spGist" autocomplete="off" spellcheck="false" placeholder="32-character id from the gist URL">
+    <div class="sp-actions">
+      <button id="spSave" class="primary">Save &amp; sync</button>
+      <button id="spSyncNow">Sync now</button>
+      <button id="spCopy">Copy setup link</button>
+      <button id="spForget" class="danger">Disconnect</button>
+    </div>
+    <div class="sp-status" id="spStatus">Not set up — areas are saved in this browser only.</div>
+    <div id="spLinkWrap" style="display:none">
+      <div class="sp-warn">This link contains your token. Only open it on your own devices; don't post or share it. Anyone with it can edit your gists.</div>
+      <label for="spLink">Setup link</label>
+      <textarea id="spLink" readonly></textarea>
+    </div>
+    <div class="sp-status">The token and gist id are stored only in this browser. Export / Import still work as a manual backup.</div>
   </div>
 </div>
 
@@ -105,6 +148,9 @@
 (function () {
   'use strict';
   var STORE_KEY = 'areaMap.v1';
+  var SYNC_KEY = 'areaMap.sync';
+  var GIST_FILE = 'areas.geojson';
+  var TOMBSTONE_DAYS = 180;
   var COLORS = ['#2563eb', '#dc2626', '#16a34a', '#d97706', '#9333ea', '#0891b2', '#db2777', '#4b5563'];
   var PRIORITIES = ['High', 'Medium', 'Low'];
 
@@ -153,6 +199,9 @@
   var areas = [];          // {id, name, color, priority, notes, created, shape, layer}
   var selectedId = null;
   var nextColor = 0;
+  var deleted = {};        // tombstones: {id: ISO time deleted}
+  function nowIso() { return new Date().toISOString(); }
+  function touch(a) { if (a) a.updatedAt = nowIso(); }
 
   function uid() { return 'a' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
@@ -192,7 +241,7 @@
 
   // ---------- Serialization ----------
   function toFeature(a) {
-    var props = { id: a.id, name: a.name, color: a.color, priority: a.priority, notes: a.notes, created: a.created, shape: a.shape,
+    var props = { id: a.id, name: a.name, color: a.color, priority: a.priority, notes: a.notes, created: a.created, updatedAt: a.updatedAt, shape: a.shape,
       acres: +(areaM2(a.layer) / 4046.8564224).toFixed(2) };
     var geom;
     if (a.layer instanceof L.Circle) {
@@ -205,10 +254,17 @@
     return { type: 'Feature', properties: props, geometry: geom };
   }
   function toFeatureCollection() {
-    return { type: 'FeatureCollection', name: 'Areas of Interest', exported: new Date().toISOString(), features: areas.map(toFeature) };
+    return { type: 'FeatureCollection', name: 'Areas of Interest', exported: nowIso(), features: areas.map(toFeature), deleted: pruneTombstones(deleted) };
   }
+  function pruneTombstones(d) {
+    var cut = Date.now() - TOMBSTONE_DAYS * 864e5, out = {};
+    Object.keys(d || {}).forEach(function (k) { if (Date.parse(d[k]) >= cut) out[k] = d[k]; });
+    return out;
+  }
+  var applyingRemote = false;
   function save() {
     try { localStorage.setItem(STORE_KEY, JSON.stringify(toFeatureCollection())); } catch (e) { console.warn('Save failed', e); }
+    if (!applyingRemote) scheduleSync();
   }
 
   function styleFor(a) {
@@ -236,7 +292,7 @@
     layer.setStyle(styleFor(a));
     layer.addTo(map);
     layer.on('click', function (e) { L.DomEvent.stopPropagation(e); select(a.id, false); openPopup(a, e.latlng); });
-    layer.on('pm:edit pm:dragend pm:markerdragend', function () { refreshAll(); save(); });
+    layer.on('pm:edit pm:dragend pm:markerdragend', function () { touch(byLayer(layer)); refreshAll(); save(); });
     bindTooltip(a);
   }
   function bindTooltip(a) {
@@ -255,18 +311,21 @@
       color: p.color || COLORS[(nextColor++) % COLORS.length],
       priority: PRIORITIES.indexOf(p.priority) >= 0 ? p.priority : 'Medium',
       notes: p.notes || '',
-      created: p.created || new Date().toISOString(),
+      created: p.created || nowIso(),
+      updatedAt: opts.keepTime ? (p.updatedAt || p.created || nowIso()) : nowIso(),
       shape: p.shape || (layer instanceof L.Circle ? 'Circle' : layer instanceof L.Rectangle ? 'Rectangle' : 'Polygon'),
       layer: layer
     };
     areas.push(a);
+    if (deleted[a.id] && Date.parse(deleted[a.id]) <= Date.parse(a.updatedAt)) delete deleted[a.id];
     attach(a);
     if (!opts.silent) { refreshAll(); save(); }
     return a;
   }
 
-  function removeArea(id) {
+  function removeArea(id, opts) {
     var a = byId(id); if (!a) return;
+    if (!(opts && opts.fromSync)) deleted[id] = nowIso();
     map.removeLayer(a.layer);
     areas = areas.filter(function (x) { return x.id !== id; });
     if (selectedId === id) { selectedId = null; closeEditor(); }
@@ -280,7 +339,8 @@
     if (!raw) return;
     try {
       var fc = JSON.parse(raw);
-      (fc.features || []).forEach(function (f) { addArea(f, { silent: true }); });
+      deleted = (fc.deleted && typeof fc.deleted === 'object') ? fc.deleted : {};
+      (fc.features || []).forEach(function (f) { addArea(f, { silent: true, keepTime: true }); });
     } catch (e) { console.warn('Could not read saved areas', e); }
     nextColor = areas.length;
     refreshAll();
@@ -295,7 +355,7 @@
 
   COLORS.forEach(function (c) {
     var b = document.createElement('button'); b.type = 'button'; b.style.background = c; b.dataset.color = c; b.title = c;
-    b.addEventListener('click', function () { var a = byId(selectedId); if (!a) return; a.color = c; refreshAll(); save(); });
+    b.addEventListener('click', function () { var a = byId(selectedId); if (!a) return; a.color = c; touch(a); refreshAll(); save(); });
     edColors.appendChild(b);
   });
 
@@ -360,14 +420,14 @@
     if (!isMobile()) L.popup({ maxWidth: 260 }).setLatLng(latlng).setContent(html).openOn(map);
   }
 
-  edName.addEventListener('input', function () { var a = byId(selectedId); if (!a) return; a.name = edName.value; renderList(); bindTooltip(a); save(); });
-  edNotes.addEventListener('input', function () { var a = byId(selectedId); if (!a) return; a.notes = edNotes.value; renderList(); save(); });
-  edPri.addEventListener('change', function () { var a = byId(selectedId); if (!a) return; a.priority = edPri.value; refreshAll(); save(); });
+  edName.addEventListener('input', function () { var a = byId(selectedId); if (!a) return; a.name = edName.value; touch(a); renderList(); bindTooltip(a); save(); });
+  edNotes.addEventListener('input', function () { var a = byId(selectedId); if (!a) return; a.notes = edNotes.value; touch(a); renderList(); save(); });
+  edPri.addEventListener('change', function () { var a = byId(selectedId); if (!a) return; a.priority = edPri.value; touch(a); refreshAll(); save(); });
   document.getElementById('edClose').addEventListener('click', closeEditor);
   document.getElementById('edZoom').addEventListener('click', function () { var a = byId(selectedId); if (a) zoomTo(a); });
   document.getElementById('edShape').addEventListener('click', function () {
     var a = byId(selectedId); if (!a) return;
-    if (a.layer.pm.enabled()) { a.layer.pm.disable(); this.textContent = 'Edit shape'; refreshAll(); save(); }
+    if (a.layer.pm.enabled()) { a.layer.pm.disable(); this.textContent = 'Edit shape'; touch(a); refreshAll(); save(); }
     else { a.layer.pm.enable({ allowSelfIntersection: false }); this.textContent = 'Done editing'; if (isMobile()) side.classList.remove('open'); }
   });
   document.getElementById('edDelete').addEventListener('click', function () {
@@ -396,7 +456,7 @@
   }
   function importGeoJSON(obj, replace) {
     var feats = obj.type === 'FeatureCollection' ? obj.features : obj.type === 'Feature' ? [obj] : (obj.type ? [{ type: 'Feature', properties: {}, geometry: obj }] : []);
-    if (replace) { areas.slice().forEach(function (a) { map.removeLayer(a.layer); }); areas = []; selectedId = null; closeEditor(); }
+    if (replace) { var t = nowIso(); areas.slice().forEach(function (a) { deleted[a.id] = t; map.removeLayer(a.layer); }); areas = []; selectedId = null; closeEditor(); }
     var added = 0, skipped = 0;
     (feats || []).forEach(function (f) { if (addArea(f, { silent: true })) added++; else skipped++; });
     refreshAll(); save();
@@ -418,8 +478,185 @@
     r.readAsText(f);
   });
 
+
+  // ---------- Cloud sync (secret GitHub gist) ----------
+  var syncCfg = null, syncTimer = null, syncing = false, syncAgain = false, lastSynced = null;
+  var syncBtn = document.getElementById('syncBtn'), syncSt = document.getElementById('syncSt');
+  var spPanel = document.getElementById('syncPanel'), spToken = document.getElementById('spToken'), spGist = document.getElementById('spGist');
+  var spStatus = document.getElementById('spStatus'), spLinkWrap = document.getElementById('spLinkWrap'), spLink = document.getElementById('spLink');
+  function readCfg() { try { var c = JSON.parse(localStorage.getItem(SYNC_KEY) || 'null'); return c && c.token && c.gist ? c : null; } catch (e) { return null; } }
+  function writeCfg(c) { try { if (c) localStorage.setItem(SYNC_KEY, JSON.stringify(c)); else localStorage.removeItem(SYNC_KEY); } catch (e) {} syncCfg = c; }
+  function cleanGistId(v) { v = String(v || '').trim(); var m = v.match(/([0-9a-f]{20,})\/?$/i); return m ? m[1] : v; }
+  function fmtTime(d) { return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); }
+  var syncState = { kind: 'off', text: '' };
+  function setStatus(kind, text) {
+    syncState = { kind: kind, text: text };
+    syncBtn.classList.remove('ok', 'warn', 'err');
+    if (kind === 'ok') syncBtn.classList.add('ok'); else if (kind === 'offline' || kind === 'busy') syncBtn.classList.add('warn'); else if (kind === 'error') syncBtn.classList.add('err');
+    syncSt.textContent = text;
+    syncBtn.title = text || 'Cloud sync settings';
+    spStatus.textContent = kind === 'off' ? 'Not set up — areas are saved in this browser only.' : text;
+  }
+
+  // Pick up a setup link (#gist=...&token=...) and strip it from the address bar right away.
+  (function readSetupHash() {
+    if (!location.hash || location.hash.indexOf('token=') < 0) return;
+    var q = {};
+    location.hash.slice(1).split('&').forEach(function (kv) { var i = kv.indexOf('='); if (i > 0) q[decodeURIComponent(kv.slice(0, i))] = decodeURIComponent(kv.slice(i + 1)); });
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { location.hash = ''; }
+    if (q.gist && q.token) writeCfg({ token: q.token.trim(), gist: cleanGistId(q.gist) });
+  })();
+
+  function featTime(f) { var p = (f && f.properties) || {}; return Date.parse(p.updatedAt || p.created || 0) || 0; }
+  // Merge two {features, deleted} sets by feature id: newest updatedAt / deletion time wins.
+  function mergeSets(a, b) {
+    var feats = {}, dels = {}, ids = {};
+    [a, b].forEach(function (set) {
+      (set.features || []).forEach(function (f) {
+        var id = f && f.properties && f.properties.id; if (!id) return; ids[id] = 1;
+        if (!feats[id] || featTime(f) > featTime(feats[id])) feats[id] = f;
+      });
+      Object.keys(set.deleted || {}).forEach(function (id) {
+        ids[id] = 1; var t = set.deleted[id];
+        if (!dels[id] || Date.parse(t) > Date.parse(dels[id])) dels[id] = t;
+      });
+    });
+    var out = { features: [], deleted: {} };
+    Object.keys(ids).forEach(function (id) {
+      var f = feats[id], d = dels[id];
+      if (d && (!f || Date.parse(d) >= featTime(f))) out.deleted[id] = d;
+      else if (f) out.features.push(f);
+    });
+    out.deleted = pruneTombstones(out.deleted);
+    return out;
+  }
+  function signature(set) {
+    var f = (set.features || []).map(function (x) { return x.properties.id + '@' + featTime(x); }).sort();
+    var d = Object.keys(set.deleted || {}).map(function (k) { return k + '@' + Date.parse(set.deleted[k]); }).sort();
+    return f.join(',') + '|' + d.join(',');
+  }
+  // Bring the on-screen areas in line with a merged set (without re-triggering sync).
+  function applySet(set) {
+    applyingRemote = true;
+    try {
+      var keep = {};
+      set.features.forEach(function (f) {
+        var p = f.properties, a = byId(p.id); keep[p.id] = 1;
+        if (a && Date.parse(a.updatedAt) === featTime(f)) return;
+        if (a) {
+          var lyr = layerFromFeature(f); if (!lyr) return;
+          if (a.layer.pm && a.layer.pm.enabled()) a.layer.pm.disable();
+          map.removeLayer(a.layer);
+          a.layer = lyr;
+          a.name = p.name || a.name; a.color = p.color || a.color;
+          a.priority = PRIORITIES.indexOf(p.priority) >= 0 ? p.priority : a.priority;
+          a.notes = p.notes || ''; a.shape = p.shape || a.shape; a.created = p.created || a.created; a.updatedAt = p.updatedAt || a.updatedAt;
+          attach(a);
+        } else {
+          addArea(f, { silent: true, keepTime: true });
+        }
+      });
+      areas.slice().forEach(function (a) { if (!keep[a.id]) removeArea(a.id, { fromSync: true }); });
+      deleted = set.deleted;
+      refreshAll(); save();
+    } finally { applyingRemote = false; }
+  }
+  function api(method, body) {
+    return fetch('https://api.github.com/gists/' + encodeURIComponent(syncCfg.gist), {
+      method: method, cache: 'no-store',
+      headers: { 'Authorization': 'Bearer ' + syncCfg.token, 'Accept': 'application/vnd.github+json', 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined
+    }).then(function (r) {
+      if (r.ok) return r.json();
+      var msg = r.status === 401 ? 'token rejected (expired or wrong)' : r.status === 404 ? 'gist not found (check id, and token needs gist scope)' : r.status === 403 ? 'access denied or rate-limited' : 'HTTP ' + r.status;
+      var err = new Error(msg); err.http = r.status; throw err;
+    });
+  }
+  function readRemote(gist) {
+    var file = gist.files && gist.files[GIST_FILE];
+    if (!file) return Promise.resolve({ features: [], deleted: {} });
+    var p = file.truncated && file.raw_url ? fetch(file.raw_url, { cache: 'no-store' }).then(function (r) { return r.text(); }) : Promise.resolve(file.content || '');
+    return p.then(function (txt) {
+      var obj = {}; try { obj = JSON.parse(txt || '{}'); } catch (e) { throw new Error('gist file is not valid JSON'); }
+      return { features: (obj.features || []).filter(function (f) { return f && f.properties && f.properties.id; }), deleted: obj.deleted || {} };
+    });
+  }
+  function syncNow() {
+    syncCfg = readCfg();
+    if (!syncCfg) { setStatus('off', ''); return Promise.resolve(false); }
+    if (syncing) { syncAgain = true; return Promise.resolve(false); }
+    clearTimeout(syncTimer);
+    if (navigator.onLine === false) { setStatus('offline', 'Offline, saved locally'); return Promise.resolve(false); }
+    syncing = true; setStatus('busy', 'Syncing…');
+    return api('GET').then(readRemote).then(function (remote) {
+      var local = toFeatureCollection(); // taken now, so edits made while the request was in flight are kept
+      var merged = mergeSets({ features: local.features, deleted: local.deleted }, remote);
+      applySet(merged);
+      if (signature(merged) === signature(remote)) return null;
+      var fc = toFeatureCollection(); fc.updated = nowIso();
+      var files = {}; files[GIST_FILE] = { content: JSON.stringify(fc, null, 1) };
+      return api('PATCH', { files: files });
+    }).then(function () {
+      lastSynced = new Date(); setStatus('ok', 'Synced ' + fmtTime(lastSynced)); return true;
+    }).catch(function (e) {
+      if (e && e.http) setStatus('error', 'Sync error: ' + e.message);
+      else if (e instanceof TypeError || navigator.onLine === false) setStatus('offline', 'Offline, saved locally');
+      else setStatus('error', 'Sync error: ' + (e && e.message || e));
+      return false;
+    }).then(function (ok) {
+      syncing = false;
+      if (syncAgain) { syncAgain = false; scheduleSync(); }
+      return ok;
+    });
+  }
+  function scheduleSync() {
+    if (!readCfg()) return;
+    clearTimeout(syncTimer);
+    if (!syncing) setStatus(navigator.onLine === false ? 'offline' : 'busy', navigator.onLine === false ? 'Offline, saved locally' : 'Saving…');
+    syncTimer = setTimeout(syncNow, 2000);
+  }
+  window.addEventListener('online', function () { syncNow(); });
+  window.addEventListener('offline', function () { if (readCfg()) setStatus('offline', 'Offline, saved locally'); });
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible' && readCfg()) syncNow(); });
+  setInterval(function () { if (document.visibilityState === 'visible' && readCfg() && !syncing) syncNow(); }, 120000);
+
+  function openSync() {
+    var c = readCfg();
+    spToken.value = c ? c.token : ''; spGist.value = c ? c.gist : '';
+    spLinkWrap.style.display = 'none'; spLink.value = '';
+    spStatus.textContent = c ? (syncState.text || 'Set up.') : 'Not set up — areas are saved in this browser only.';
+    spPanel.classList.add('open');
+  }
+  syncBtn.addEventListener('click', openSync);
+  document.getElementById('spClose').addEventListener('click', function () { spPanel.classList.remove('open'); });
+  spPanel.addEventListener('click', function (e) { if (e.target === spPanel) spPanel.classList.remove('open'); });
+  document.getElementById('spSave').addEventListener('click', function () {
+    var t = spToken.value.trim(), g = cleanGistId(spGist.value);
+    if (!t || !g) { spStatus.textContent = 'Enter both the token and the gist id.'; return; }
+    writeCfg({ token: t, gist: g }); spGist.value = g;
+    syncNow().then(function (ok) { if (ok) setTimeout(function () { spPanel.classList.remove('open'); }, 800); });
+  });
+  document.getElementById('spSyncNow').addEventListener('click', function () {
+    if (!readCfg()) { spStatus.textContent = 'Save a token and gist id first.'; return; }
+    syncNow();
+  });
+  document.getElementById('spCopy').addEventListener('click', function () {
+    var c = readCfg();
+    if (!c) { spStatus.textContent = 'Save a token and gist id first.'; return; }
+    var link = location.origin + location.pathname + '#gist=' + encodeURIComponent(c.gist) + '&token=' + encodeURIComponent(c.token);
+    spLink.value = link; spLinkWrap.style.display = 'block';
+    var done = function () { spStatus.textContent = 'Setup link copied. Open it on your other device (it contains your token).'; };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(link).then(done, function () { spLink.select(); spStatus.textContent = 'Copy the link below.'; });
+    else { spLink.select(); spStatus.textContent = 'Copy the link below.'; }
+  });
+  document.getElementById('spForget').addEventListener('click', function () {
+    if (!confirm('Disconnect sync on this device? Your areas stay saved in this browser.')) return;
+    writeCfg(null); spToken.value = ''; spGist.value = ''; setStatus('off', '');
+  });
+
   load();
   renderList();
+  if (readCfg()) syncNow(); else setStatus('off', '');
 
   // Small API (used for testing / console)
   window.AreaMap = {
@@ -431,6 +668,9 @@
     importGeoJSON: importGeoJSON,
     exportGeoJSON: exportGeoJSON,
     select: function (id) { select(id, true); },
+    syncNow: syncNow,
+    syncStatus: function () { return syncState; },
+    rename: function (id, name) { var a = byId(id); if (!a) return; a.name = name; touch(a); refreshAll(); save(); },
     clear: function () { areas.slice().forEach(function (a) { removeArea(a.id); }); }
   };
 })();
