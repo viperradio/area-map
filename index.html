@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Cpath d=%27M2 3l4-1 4 2 4-1v11l-4 1-4-2-4 1z%27 fill=%27%232563eb%27/%3E%3C/svg%3E">
+<title>Areas of Interest · Nevada County</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.css">
+<style>
+  :root { --bg:#fff; --fg:#1f2937; --muted:#6b7280; --line:#e5e7eb; --accent:#2563eb; --side:340px; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color:var(--fg); }
+  #app { display:flex; flex-direction:column; height:100%; height:100dvh; }
+  header { display:flex; align-items:center; gap:8px; padding:8px 12px; border-bottom:1px solid var(--line); background:var(--bg); z-index:1001; padding-top:max(8px, env(safe-area-inset-top)); }
+  header h1 { font-size:16px; margin:0; flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  button, .btn { font:inherit; font-size:14px; border:1px solid var(--line); background:#fff; color:var(--fg); padding:7px 11px; border-radius:8px; cursor:pointer; }
+  button:hover, .btn:hover { background:#f3f4f6; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  button.danger { color:#b91c1c; border-color:#fecaca; }
+  #main { flex:1; display:flex; min-height:0; position:relative; }
+  #side { width:var(--side); border-right:1px solid var(--line); background:var(--bg); display:flex; flex-direction:column; min-height:0; }
+  #map { flex:1; min-height:0; }
+  .side-head { padding:10px 12px; border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; }
+  .side-head .count { color:var(--muted); font-size:13px; }
+  #list { list-style:none; margin:0; padding:0; overflow:auto; flex:1; }
+  #list li { padding:10px 12px; border-bottom:1px solid var(--line); cursor:pointer; display:flex; gap:10px; align-items:flex-start; }
+  #list li:hover { background:#f9fafb; }
+  #list li.sel { background:#eff6ff; }
+  .swatch { width:14px; height:14px; border-radius:4px; flex:none; margin-top:3px; border:1px solid rgba(0,0,0,.15); }
+  .li-main { flex:1; min-width:0; }
+  .li-name { font-weight:600; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .li-meta { font-size:12px; color:var(--muted); margin-top:2px; }
+  .li-notes { font-size:12px; color:#374151; margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .pri { font-size:11px; font-weight:600; padding:1px 6px; border-radius:999px; }
+  .pri-High { background:#fee2e2; color:#991b1b; } .pri-Medium { background:#fef3c7; color:#92400e; } .pri-Low { background:#e0f2fe; color:#075985; }
+  .empty { padding:18px 14px; color:var(--muted); font-size:14px; line-height:1.5; }
+  #editor { border-top:1px solid var(--line); padding:12px; display:none; background:#fafafa; overflow:auto; max-height:60%; }
+  #editor.open { display:block; }
+  #editor label { display:block; font-size:12px; color:var(--muted); margin:8px 0 3px; }
+  #editor input[type=text], #editor select, #editor textarea { width:100%; font:inherit; font-size:16px; padding:7px 9px; border:1px solid var(--line); border-radius:8px; background:#fff; }
+  #editor textarea { min-height:80px; resize:vertical; }
+  .row { display:flex; gap:8px; align-items:center; }
+  .colors { display:flex; gap:6px; flex-wrap:wrap; }
+  .colors button { width:28px; height:28px; padding:0; border-radius:50%; border:2px solid #fff; box-shadow:0 0 0 1px var(--line); }
+  .colors button.on { box-shadow:0 0 0 2px var(--fg); }
+  .ed-actions { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+  .ed-size { font-size:13px; color:var(--muted); margin-top:4px; }
+  .leaflet-popup-content { font-size:13px; }
+  .popup-name { font-weight:600; font-size:14px; }
+  #toggleSide { display:none; }
+  #main:has(#side.open) .leaflet-control-scale { display:none; }
+  #fileIn { display:none; }
+  .hint { font-size:12px; color:var(--muted); padding:8px 12px; border-top:1px solid var(--line); }
+  @media (max-width: 760px) {
+    #toggleSide { display:inline-block; }
+    header h1 { font-size:15px; }
+    header .lbl { display:none; }
+    #side { position:absolute; left:0; right:0; bottom:0; width:auto; height:55%; z-index:1000; border-right:none; border-top:1px solid var(--line); border-radius:14px 14px 0 0; box-shadow:0 -6px 20px rgba(0,0,0,.15); transform:translateY(100%); transition:transform .2s ease; padding-bottom:env(safe-area-inset-bottom); }
+    #side.open { transform:translateY(0); }
+    #editor { max-height:none; flex:1; }
+    #side.editing #list, #side.editing .hint { display:none; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Areas of Interest · Grass Valley / Nevada City</h1>
+    <button id="toggleSide" title="Show areas">☰ <span id="cntBtn">0</span></button>
+    <button id="exportBtn" title="Download GeoJSON backup">⬇<span class="lbl"> Export</span></button>
+    <button id="importBtn" title="Load a GeoJSON file">⬆<span class="lbl"> Import</span></button>
+    <input type="file" id="fileIn" accept=".geojson,.json,application/geo+json,application/json">
+  </header>
+  <div id="main">
+    <aside id="side">
+      <div class="side-head"><strong>Areas</strong><span class="count" id="count">0 areas</span></div>
+      <ul id="list"></ul>
+      <div id="editor">
+        <div class="row" style="justify-content:space-between"><strong>Edit area</strong><button id="edClose" title="Close">✕</button></div>
+        <div class="ed-size" id="edSize"></div>
+        <label for="edName">Name</label>
+        <input type="text" id="edName" placeholder="e.g. Brunswick Basin">
+        <label>Color</label>
+        <div class="colors" id="edColors"></div>
+        <label for="edPri">Priority</label>
+        <select id="edPri"><option>High</option><option selected>Medium</option><option>Low</option></select>
+        <label for="edNotes">Notes</label>
+        <textarea id="edNotes" placeholder="Zoning, target price, rents, drive time…"></textarea>
+        <div class="ed-actions">
+          <button id="edZoom">Zoom to</button>
+          <button id="edShape">Edit shape</button>
+          <button id="edDelete" class="danger">Delete</button>
+        </div>
+      </div>
+      <div class="hint">Draw with the tools on the map (polygon, rectangle, circle). Click an area to edit it. Saved automatically in this browser — use Export to back up or move to another device.</div>
+    </aside>
+    <div id="map"></div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.min.js"></script>
+<script>
+(function () {
+  'use strict';
+  var STORE_KEY = 'areaMap.v1';
+  var COLORS = ['#2563eb', '#dc2626', '#16a34a', '#d97706', '#9333ea', '#0891b2', '#db2777', '#4b5563'];
+  var PRIORITIES = ['High', 'Medium', 'Low'];
+
+  // ---------- Map ----------
+  var osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, attribution: '&copy; OpenStreetMap contributors'
+  });
+  var sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 19, attribution: 'Imagery &copy; Esri, Maxar, Earthstar Geographics'
+  });
+  var labels = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 19, attribution: 'Labels &copy; Esri'
+  });
+  var map = L.map('map', { zoomControl: true, layers: [osm] }).setView([39.23, -121.04], 12);
+  L.control.layers({ 'Street map': osm, 'Satellite': sat, 'Satellite + labels': L.layerGroup([sat, labels]) }, null, { position: 'topright' }).addTo(map);
+  L.control.scale({ imperial: true, metric: false }).addTo(map);
+
+  // Locate-me button (handy on a phone in the field)
+  var Locate = L.Control.extend({
+    options: { position: 'topleft' },
+    onAdd: function () {
+      var a = L.DomUtil.create('a', 'leaflet-bar');
+      a.href = '#'; a.title = 'Show my location'; a.innerHTML = '◎';
+      a.style.cssText = 'display:block;width:34px;height:34px;line-height:34px;text-align:center;background:#fff;font-size:18px;color:#333;text-decoration:none';
+      L.DomEvent.on(a, 'click', function (e) { L.DomEvent.stop(e); map.locate({ setView: true, maxZoom: 15 }); });
+      return a;
+    }
+  });
+  map.addControl(new Locate());
+  var meMarker = null;
+  map.on('locationfound', function (e) {
+    if (meMarker) map.removeLayer(meMarker);
+    meMarker = L.circleMarker(e.latlng, { radius: 7, color: '#fff', weight: 2, fillColor: '#2563eb', fillOpacity: 1, pmIgnore: true }).addTo(map);
+  });
+  map.on('locationerror', function (e) { alert('Could not get your location: ' + e.message); });
+
+  map.pm.addControls({
+    position: 'topleft',
+    drawMarker: false, drawCircleMarker: false, drawPolyline: false, drawText: false,
+    drawPolygon: true, drawRectangle: true, drawCircle: true,
+    editMode: true, dragMode: true, cutPolygon: false, removalMode: true, rotateMode: false
+  });
+  map.pm.setGlobalOptions({ snappable: false, allowSelfIntersection: false });
+
+  // ---------- State ----------
+  var areas = [];          // {id, name, color, priority, notes, created, shape, layer}
+  var selectedId = null;
+  var nextColor = 0;
+
+  function uid() { return 'a' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function byId(id) { for (var i = 0; i < areas.length; i++) if (areas[i].id === id) return areas[i]; return null; }
+  function byLayer(layer) { for (var i = 0; i < areas.length; i++) if (areas[i].layer === layer) return areas[i]; return null; }
+
+  // ---------- Area math ----------
+  var R = 6378137;
+  function ringArea(latlngs) { // spherical excess approx (same as Leaflet.draw's GeometryUtil)
+    var a = 0, n = latlngs.length, d2r = Math.PI / 180;
+    if (n < 3) return 0;
+    for (var i = 0; i < n; i++) {
+      var p1 = latlngs[i], p2 = latlngs[(i + 1) % n];
+      a += ((p2.lng - p1.lng) * d2r) * (2 + Math.sin(p1.lat * d2r) + Math.sin(p2.lat * d2r));
+    }
+    return Math.abs(a * R * R / 2);
+  }
+  function polyArea(ll) { // handles nested arrays: [ring,...] or [[ring,...],...]
+    if (!ll.length) return 0;
+    if (ll[0] instanceof L.LatLng) return ringArea(ll);
+    if (ll[0].length && ll[0][0] instanceof L.LatLng) { // polygon with holes
+      var s = ringArea(ll[0]);
+      for (var i = 1; i < ll.length; i++) s -= ringArea(ll[i]);
+      return s;
+    }
+    var t = 0; for (var j = 0; j < ll.length; j++) t += polyArea(ll[j]); return t; // multipolygon
+  }
+  function areaM2(layer) {
+    if (layer instanceof L.Circle) { var r = layer.getRadius(); return Math.PI * r * r; }
+    return polyArea(layer.getLatLngs());
+  }
+  function fmtArea(m2) {
+    var acres = m2 / 4046.8564224, sqmi = m2 / 2589988.110336;
+    var ac = acres >= 100 ? Math.round(acres).toLocaleString() : acres.toFixed(acres >= 10 ? 0 : 1);
+    return ac + ' ac · ' + (sqmi >= 10 ? sqmi.toFixed(1) : sqmi.toFixed(2)) + ' sq mi';
+  }
+
+  // ---------- Serialization ----------
+  function toFeature(a) {
+    var props = { id: a.id, name: a.name, color: a.color, priority: a.priority, notes: a.notes, created: a.created, shape: a.shape,
+      acres: +(areaM2(a.layer) / 4046.8564224).toFixed(2) };
+    var geom;
+    if (a.layer instanceof L.Circle) {
+      var c = a.layer.getLatLng();
+      geom = { type: 'Point', coordinates: [c.lng, c.lat] };
+      props.radius = a.layer.getRadius(); // meters
+    } else {
+      geom = a.layer.toGeoJSON().geometry;
+    }
+    return { type: 'Feature', properties: props, geometry: geom };
+  }
+  function toFeatureCollection() {
+    return { type: 'FeatureCollection', name: 'Areas of Interest', exported: new Date().toISOString(), features: areas.map(toFeature) };
+  }
+  function save() {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(toFeatureCollection())); } catch (e) { console.warn('Save failed', e); }
+  }
+
+  function styleFor(a) {
+    var w = a.priority === 'High' ? 3 : 2;
+    return { color: a.color, weight: w, fillColor: a.color, fillOpacity: a.id === selectedId ? 0.32 : 0.18, dashArray: a.priority === 'Low' ? '6 5' : null };
+  }
+
+  function layerFromFeature(f) {
+    var g = f.geometry, p = f.properties || {};
+    if (!g) return null;
+    if (g.type === 'Point' && p.radius) return L.circle([g.coordinates[1], g.coordinates[0]], { radius: +p.radius });
+    if (g.type === 'Polygon' || g.type === 'MultiPolygon') {
+      if (p.shape === 'Rectangle' && g.type === 'Polygon') {
+        var b = L.latLngBounds(g.coordinates[0].map(function (c) { return [c[1], c[0]]; }));
+        return L.rectangle(b);
+      }
+      var lyr = L.geoJSON(f).getLayers()[0];
+      return lyr || null;
+    }
+    return null; // unsupported geometry (lines, plain points) is skipped
+  }
+
+  function attach(a) {
+    var layer = a.layer;
+    layer.setStyle(styleFor(a));
+    layer.addTo(map);
+    layer.on('click', function (e) { L.DomEvent.stopPropagation(e); select(a.id, false); openPopup(a, e.latlng); });
+    layer.on('pm:edit pm:dragend pm:markerdragend', function () { refreshAll(); save(); });
+    bindTooltip(a);
+  }
+  function bindTooltip(a) {
+    a.layer.unbindTooltip();
+    if (a.name) a.layer.bindTooltip(esc(a.name), { sticky: true, direction: 'top' });
+  }
+
+  function addArea(feature, opts) {
+    opts = opts || {};
+    var p = (feature && feature.properties) || {};
+    var layer = opts.layer || layerFromFeature(feature);
+    if (!layer) return null;
+    var a = {
+      id: (p.id && !byId(p.id)) ? p.id : uid(),
+      name: p.name || ('Area ' + (areas.length + 1)),
+      color: p.color || COLORS[(nextColor++) % COLORS.length],
+      priority: PRIORITIES.indexOf(p.priority) >= 0 ? p.priority : 'Medium',
+      notes: p.notes || '',
+      created: p.created || new Date().toISOString(),
+      shape: p.shape || (layer instanceof L.Circle ? 'Circle' : layer instanceof L.Rectangle ? 'Rectangle' : 'Polygon'),
+      layer: layer
+    };
+    areas.push(a);
+    attach(a);
+    if (!opts.silent) { refreshAll(); save(); }
+    return a;
+  }
+
+  function removeArea(id) {
+    var a = byId(id); if (!a) return;
+    map.removeLayer(a.layer);
+    areas = areas.filter(function (x) { return x.id !== id; });
+    if (selectedId === id) { selectedId = null; closeEditor(); }
+    map.closePopup();
+    refreshAll(); save();
+  }
+
+  function load() {
+    var raw = null;
+    try { raw = localStorage.getItem(STORE_KEY); } catch (e) {}
+    if (!raw) return;
+    try {
+      var fc = JSON.parse(raw);
+      (fc.features || []).forEach(function (f) { addArea(f, { silent: true }); });
+    } catch (e) { console.warn('Could not read saved areas', e); }
+    nextColor = areas.length;
+    refreshAll();
+  }
+
+  // ---------- UI ----------
+  var listEl = document.getElementById('list'), countEl = document.getElementById('count'), cntBtn = document.getElementById('cntBtn');
+  var side = document.getElementById('side'), editor = document.getElementById('editor');
+  var edName = document.getElementById('edName'), edPri = document.getElementById('edPri'), edNotes = document.getElementById('edNotes');
+  var edColors = document.getElementById('edColors'), edSize = document.getElementById('edSize');
+  var isMobile = function () { return window.matchMedia('(max-width: 760px)').matches; };
+
+  COLORS.forEach(function (c) {
+    var b = document.createElement('button'); b.type = 'button'; b.style.background = c; b.dataset.color = c; b.title = c;
+    b.addEventListener('click', function () { var a = byId(selectedId); if (!a) return; a.color = c; refreshAll(); save(); });
+    edColors.appendChild(b);
+  });
+
+  var PRI_ORDER = { High: 0, Medium: 1, Low: 2 };
+  function renderList() {
+    var n = areas.length;
+    countEl.textContent = n + (n === 1 ? ' area' : ' areas');
+    cntBtn.textContent = n;
+    if (!n) { listEl.innerHTML = '<li class="empty" style="cursor:default">No areas yet. Use the polygon ⬠, rectangle ▭ or circle ◯ tools on the left side of the map to draw one.</li>'; return; }
+    var sorted = areas.slice().sort(function (x, y) { return (PRI_ORDER[x.priority] - PRI_ORDER[y.priority]) || x.name.localeCompare(y.name); });
+    listEl.innerHTML = sorted.map(function (a) {
+      return '<li data-id="' + esc(a.id) + '" class="' + (a.id === selectedId ? 'sel' : '') + '">' +
+        '<span class="swatch" style="background:' + esc(a.color) + '"></span>' +
+        '<div class="li-main"><div class="li-name">' + esc(a.name) + '</div>' +
+        '<div class="li-meta"><span class="pri pri-' + a.priority + '">' + a.priority + '</span> · ' + fmtArea(areaM2(a.layer)) + '</div>' +
+        (a.notes ? '<div class="li-notes">' + esc(a.notes) + '</div>' : '') + '</div></li>';
+    }).join('');
+  }
+  listEl.addEventListener('click', function (e) {
+    var li = e.target.closest('li[data-id]'); if (!li) return;
+    select(li.dataset.id, true);
+  });
+
+  function refreshAll() {
+    areas.forEach(function (a) { a.layer.setStyle(styleFor(a)); bindTooltip(a); });
+    renderList();
+    if (selectedId) fillEditor();
+  }
+
+  function fillEditor() {
+    var a = byId(selectedId); if (!a) return;
+    if (document.activeElement !== edName) edName.value = a.name;
+    edPri.value = a.priority;
+    if (document.activeElement !== edNotes) edNotes.value = a.notes;
+    edSize.textContent = a.shape + ' · ' + fmtArea(areaM2(a.layer));
+    Array.prototype.forEach.call(edColors.children, function (b) { b.classList.toggle('on', b.dataset.color === a.color); });
+  }
+
+  function select(id, zoom) {
+    selectedId = id;
+    var a = byId(id); if (!a) return;
+    editor.classList.add('open'); side.classList.add('editing');
+    if (isMobile()) side.classList.add('open');
+    refreshAll();
+    if (zoom) zoomTo(a);
+  }
+  function closeEditor() {
+    editor.classList.remove('open'); side.classList.remove('editing');
+    var a = byId(selectedId); selectedId = null;
+    if (a && a.layer.pm && a.layer.pm.enabled()) a.layer.pm.disable();
+    refreshAll();
+  }
+  function zoomTo(a) {
+    var pad = isMobile() ? { paddingTopLeft: [20, 20], paddingBottomRight: [20, window.innerHeight * 0.55] } : { padding: [30, 30] };
+    map.fitBounds(a.layer.getBounds(), pad);
+  }
+  function openPopup(a, latlng) {
+    var html = '<div class="popup-name">' + esc(a.name) + '</div>' +
+      '<div><span class="pri pri-' + a.priority + '">' + a.priority + '</span> · ' + fmtArea(areaM2(a.layer)) + '</div>' +
+      (a.notes ? '<div style="margin-top:4px;white-space:pre-wrap">' + esc(a.notes) + '</div>' : '') +
+      '<div style="margin-top:6px;color:#6b7280">Edit details in the panel.</div>';
+    if (!isMobile()) L.popup({ maxWidth: 260 }).setLatLng(latlng).setContent(html).openOn(map);
+  }
+
+  edName.addEventListener('input', function () { var a = byId(selectedId); if (!a) return; a.name = edName.value; renderList(); bindTooltip(a); save(); });
+  edNotes.addEventListener('input', function () { var a = byId(selectedId); if (!a) return; a.notes = edNotes.value; renderList(); save(); });
+  edPri.addEventListener('change', function () { var a = byId(selectedId); if (!a) return; a.priority = edPri.value; refreshAll(); save(); });
+  document.getElementById('edClose').addEventListener('click', closeEditor);
+  document.getElementById('edZoom').addEventListener('click', function () { var a = byId(selectedId); if (a) zoomTo(a); });
+  document.getElementById('edShape').addEventListener('click', function () {
+    var a = byId(selectedId); if (!a) return;
+    if (a.layer.pm.enabled()) { a.layer.pm.disable(); this.textContent = 'Edit shape'; refreshAll(); save(); }
+    else { a.layer.pm.enable({ allowSelfIntersection: false }); this.textContent = 'Done editing'; if (isMobile()) side.classList.remove('open'); }
+  });
+  document.getElementById('edDelete').addEventListener('click', function () {
+    var a = byId(selectedId); if (!a) return;
+    if (confirm('Delete "' + a.name + '"?')) removeArea(a.id);
+  });
+  document.getElementById('toggleSide').addEventListener('click', function () { side.classList.toggle('open'); });
+
+  // Geoman events
+  map.on('pm:create', function (e) {
+    var a = addArea(null, { layer: e.layer });
+    if (a) select(a.id, false);
+    setTimeout(function () { edName.focus(); edName.select(); }, 50);
+  });
+  map.on('pm:remove', function (e) { var a = byLayer(e.layer); if (a) removeArea(a.id); });
+  map.on('pm:globaleditmodetoggled pm:globaldragmodetoggled', function () { refreshAll(); save(); });
+
+  // ---------- Export / Import ----------
+  function exportGeoJSON() {
+    var blob = new Blob([JSON.stringify(toFeatureCollection(), null, 2)], { type: 'application/geo+json' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'areas-of-interest-' + new Date().toISOString().slice(0, 10) + '.geojson';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+  }
+  function importGeoJSON(obj, replace) {
+    var feats = obj.type === 'FeatureCollection' ? obj.features : obj.type === 'Feature' ? [obj] : (obj.type ? [{ type: 'Feature', properties: {}, geometry: obj }] : []);
+    if (replace) { areas.slice().forEach(function (a) { map.removeLayer(a.layer); }); areas = []; selectedId = null; closeEditor(); }
+    var added = 0, skipped = 0;
+    (feats || []).forEach(function (f) { if (addArea(f, { silent: true })) added++; else skipped++; });
+    refreshAll(); save();
+    if (added) { var grp = L.featureGroup(areas.map(function (a) { return a.layer; })); map.fitBounds(grp.getBounds(), { padding: [30, 30] }); }
+    return { added: added, skipped: skipped };
+  }
+  document.getElementById('exportBtn').addEventListener('click', exportGeoJSON);
+  var fileIn = document.getElementById('fileIn');
+  document.getElementById('importBtn').addEventListener('click', function () { fileIn.value = ''; fileIn.click(); });
+  fileIn.addEventListener('change', function () {
+    var f = fileIn.files[0]; if (!f) return;
+    var r = new FileReader();
+    r.onload = function () {
+      var obj; try { obj = JSON.parse(r.result); } catch (e) { alert('That file is not valid JSON/GeoJSON.'); return; }
+      var replace = areas.length ? confirm('Replace your current ' + areas.length + ' area(s) with the imported file?\n\nOK = replace · Cancel = add to existing') : false;
+      var res = importGeoJSON(obj, replace);
+      alert('Imported ' + res.added + ' area(s)' + (res.skipped ? ', skipped ' + res.skipped + ' unsupported feature(s)' : '') + '.');
+    };
+    r.readAsText(f);
+  });
+
+  load();
+  renderList();
+
+  // Small API (used for testing / console)
+  window.AreaMap = {
+    map: map,
+    add: function (feature) { var a = addArea(feature); return a && a.id; },
+    remove: removeArea,
+    list: function () { return areas.map(toFeature); },
+    toGeoJSON: toFeatureCollection,
+    importGeoJSON: importGeoJSON,
+    exportGeoJSON: exportGeoJSON,
+    select: function (id) { select(id, true); },
+    clear: function () { areas.slice().forEach(function (a) { removeArea(a.id); }); }
+  };
+})();
+</script>
+</body>
+</html>
